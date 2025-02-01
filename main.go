@@ -4,7 +4,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,9 +17,35 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
-const leaderStatusFile = "/tmp/leader_status"
+var (
+	statusDir     string
+	leaderFile    string
+	followerFile  string
+	currentRole   string
+	roleCancel    context.CancelFunc
+)
+
+const (
+	defaultStatusDir = "/tmp/leader_status"
+	tickInterval     = 5 * time.Second
+)
+
+func initStatus() {
+	statusDir = os.Getenv("STATUS_DIR")
+	if statusDir == "" {
+		statusDir = defaultStatusDir
+	}
+	if err := os.MkdirAll(statusDir, 0755); err != nil {
+		panic(fmt.Sprintf("failed to create status directory %q: %v", statusDir, err))
+	}
+	leaderFile = filepath.Join(statusDir, "leader")
+	followerFile = filepath.Join(statusDir, "follower")
+}
 
 func main() {
+	initStatus()
+	go startHealthServer()
+
 	// Get in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -74,46 +102,76 @@ func main() {
 		RetryPeriod:   2 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
-				// we're now the leader
-				updateStatus(id)
+				setRole("leader", id)
+				<-ctx.Done()
 			},
 			OnStoppedLeading: func() {
-				// we are not the leader anymore
-				removeStatusFile()
+				setRole("follower", id)
 			},
 			OnNewLeader: func(identity string) {
-				// we observe a new leader
 				if identity != id {
-					removeStatusFile()
+					setRole("follower", id)
 				}
 			},
 		},
 	})
 }
 
-func updateStatus(status string) {
-	f, err := os.Create(leaderStatusFile)
-	if err != nil {
-		panic(err.Error())
+func setRole(role, identity string) {
+	if currentRole == role {
+		return
 	}
 
-	defer func() {
-		if err := f.Close(); err != nil {
-			fmt.Printf("failed to close file: %v", err)
+	if roleCancel != nil {
+		roleCancel()
+	}
+	
+	os.Remove(leaderFile)
+	os.Remove(followerFile)
+
+	filePath := followerFile
+	if role == "leader" {
+		filePath = leaderFile
+	}
+
+	if err := os.WriteFile(filePath, []byte(identity), 0644); err != nil {
+		fmt.Printf("failed to write %s file: %v\n", role, err)
+	}
+	currentRole = role
+
+	ctx, cancel := context.WithCancel(context.Background())
+	roleCancel = cancel
+	go func() {
+		ticker := time.NewTicker(tickInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				now := time.Now()
+				if err := os.Chtimes(filePath, now, now); err != nil {
+					fmt.Printf("failed to touch %s: %v\n", filePath, err)
+				}
+			}
 		}
 	}()
-
-	_, err = f.WriteString(status)
-	if err != nil {
-		panic(err.Error())
-	}
-	if err := f.Sync(); err != nil {
-		fmt.Printf("failed to sync file: %v", err)
-	}
 }
 
-func removeStatusFile() {
-	if err := os.Remove(leaderStatusFile); err != nil {
-		fmt.Printf("failed to remove %s, error: %s", leaderStatusFile, err)
+func startHealthServer() {
+	port := os.Getenv("HEALTH_PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	
+	addr := fmt.Sprintf(":%s", port)
+	fmt.Printf("Starting health server on %s\n", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		fmt.Printf("health server error: %v\n", err)
 	}
 }
