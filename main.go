@@ -10,6 +10,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -82,6 +83,16 @@ func main() {
 		panic("NAMESPACE not set")
 	}
 
+	labelPodRole := os.Getenv("LABEL_POD_ROLE") == "true"
+	var podName string
+	if labelPodRole {
+		var exists bool
+		podName, exists = os.LookupEnv("POD_NAME")
+		if !exists {
+			panic("POD_NAME must be set when LABEL_POD_ROLE is enabled")
+		}
+	}
+
 	// Lock required for leader election
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
@@ -103,14 +114,23 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				setRole("leader", id)
+				if labelPodRole {
+					_ = patchPodRole(clientset, namespace, podName, "leader")
+				}
 				<-ctx.Done()
 			},
 			OnStoppedLeading: func() {
 				setRole("follower", id)
+				if labelPodRole {
+					_ = patchPodRole(clientset, namespace, podName, "follower")
+				}
 			},
 			OnNewLeader: func(identity string) {
 				if identity != id {
 					setRole("follower", id)
+					if labelPodRole {
+						_ = patchPodRole(clientset, namespace, podName, "follower")
+					}
 				}
 			},
 		},
@@ -165,6 +185,21 @@ func setRole(role, identity string) {
 			}
 		}
 	}()
+}
+
+func patchPodRole(client *kubernetes.Clientset, namespace, podName, role string) error {
+	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{"role":"%s"}}}`, role))
+	_, err := client.CoreV1().Pods(namespace).Patch(
+		context.TODO(),
+		podName,
+		types.StrategicMergePatchType,
+		patch, 
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		fmt.Printf("failed to patch pod role: %v\n", err)
+	}
+	return err
 }
 
 func startHealthServer() {

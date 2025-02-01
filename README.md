@@ -61,6 +61,33 @@ do
 done
 ```
 
+### Optional Pod Role Labeling
+
+When enabled, the sidecar will label its own pod with `role=leader`/`role=follower`.
+To enable, set these environment variables in your deployment:
+
+```yaml
+env:
+- name: LABEL_POD_ROLE
+  value: "true"  # Enables the labeling feature
+- name: POD_NAME  # Required when using labeling
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+```
+
+**Required RBAC** (only needed when using labels):
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: leader-elector
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["patch"]
+```
+
 ## Building and Running Locally
 
 You can build and run this project locally with Go:
