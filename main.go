@@ -27,7 +27,7 @@ var (
 
 const (
 	defaultStatusDir = "/tmp/leader_status"
-	tickInterval     = 5 * time.Second
+	tickInterval     = 2 * time.Second  // Match leader election retry period
 )
 
 func initStatus() {
@@ -150,8 +150,17 @@ func setRole(role, identity string) {
 				return
 			case <-ticker.C:
 				now := time.Now()
-				if err := os.Chtimes(filePath, now, now); err != nil {
-					fmt.Printf("failed to touch %s: %v\n", filePath, err)
+				// Re-validate and update role file every tick
+				if currentRole == "leader" {
+					// For leader, verify we still hold the lease
+					if err := os.WriteFile(filePath, []byte(identity), 0644); err != nil {
+						fmt.Printf("failed to refresh leader file: %v\n", err)
+					}
+				} else {
+					// For follower, just touch the timestamp
+					if err := os.Chtimes(filePath, now, now); err != nil {
+						fmt.Printf("failed to touch %s: %v\n", filePath, err)
+					}
 				}
 			}
 		}
