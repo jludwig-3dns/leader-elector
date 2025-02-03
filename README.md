@@ -31,13 +31,12 @@ spec:
       valueFrom:
         fieldRef:
           fieldPath: metadata.namespace
-    
     # Optional Variables
     # - name: STATUS_DIR
     #   value: "/shared/leader_status"  # Override default /tmp/leader_status
     # - name: HEALTH_PORT
     #   value: "9090"  # Override default 8080
-    
+
     # Pod Labeling Variables (requires RBAC)
     # - name: LABEL_POD_ROLE
     #   value: "true"  # Enables role=leader/follower labels
@@ -76,6 +75,37 @@ do
 done
 ```
 
+### Dynamic Pod Labeling
+
+This updated version patches its own Pod with a `role` label:
+- When the Pod becomes leader, it sets `role=leader`.
+- When it loses leadership, it sets `role=follower`.
+
+To support this, ensure:
+1. Your ServiceAccount has the `patch` permission on Pods.
+2. The Pod spec injects `POD_NAME` (and optionally `POD_NAMESPACE`) via the Downward API.
+
+For example, update your Service spec to route traffic only to the leader:
+```yaml
+spec:
+  selector:
+    app: nfs-server
+    role: leader
+```
+
+**Required RBAC** (only needed when using labels):
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: leader-elector
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["patch"]
+```
+
 ### Environment Variables
 
 #### Core Required Variables
@@ -89,18 +119,6 @@ done
 #### Pod Labeling Variables (requires RBAC)
 - **`LABEL_POD_ROLE`**: Set to "true" to enable role labeling (`role=leader`/`role=follower`)
 - **`POD_NAME`**: Required when using labels (use Downward API)
-
-**Required RBAC** (only needed when using labels):
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: leader-elector
-rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["patch"]
-```
 
 ## Building and Running Locally
 
