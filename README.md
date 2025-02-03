@@ -82,28 +82,53 @@ This updated version patches its own Pod with a `role` label:
 - When it loses leadership, it sets `role=follower`.
 
 To support this, ensure:
-1. Your ServiceAccount has the `patch` permission on Pods.
-2. The Pod spec injects `POD_NAME` (and optionally `POD_NAMESPACE`) via the Downward API.
+1. Your Pod uses a ServiceAccount with the `patch` permission on Pods
+2. Create a RoleBinding linking the ServiceAccount to the required Role
+3. The Pod spec injects `POD_NAME` via the Downward API
 
-For example, update your Service spec to route traffic only to the leader:
-```yaml
-spec:
-  selector:
-    app: nfs-server
-    role: leader
-```
-
-**Required RBAC** (only needed when using labels):
+**Required RBAC**:
 
 ```yaml
+# ServiceAccount for your pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: leader-elector-sa
+  namespace: your-namespace
+
+# Role with pod patch permission
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: leader-elector
+  name: leader-elector-role
+  namespace: your-namespace
 rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["patch"]
+
+# Bind Role to ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: leader-elector-rolebinding
+  namespace: your-namespace
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: leader-elector-role
+subjects:
+- kind: ServiceAccount
+  name: leader-elector-sa
+  namespace: your-namespace
+```
+
+Then update your Deployment spec to use the service account:
+```yaml
+spec:
+  serviceAccountName: leader-elector-sa
+  containers:
+  # ... your containers ...
 ```
 
 ### Environment Variables
