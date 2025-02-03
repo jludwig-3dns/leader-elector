@@ -24,12 +24,27 @@ spec:
   - name: leader-election-sidecar
     image: supporttools/leader-elector:latest
     env:
+    # Core Required Variables
     - name: LEASE_NAME
       value: myapp-lock
     - name: NAMESPACE
       valueFrom:
         fieldRef:
           fieldPath: metadata.namespace
+    
+    # Optional Variables
+    # - name: STATUS_DIR
+    #   value: "/shared/leader_status"  # Override default /tmp/leader_status
+    # - name: HEALTH_PORT
+    #   value: "9090"  # Override default 8080
+    
+    # Pod Labeling Variables (requires RBAC)
+    # - name: LABEL_POD_ROLE
+    #   value: "true"  # Enables role=leader/follower labels
+    # - name: POD_NAME  # Required when using labels
+    #   valueFrom:
+    #     fieldRef:
+    #       fieldPath: metadata.name
     volumeMounts:
     - name: leader-status
       mountPath: /tmp/leader_status
@@ -61,20 +76,19 @@ do
 done
 ```
 
-### Optional Pod Role Labeling
+### Environment Variables
 
-When enabled, the sidecar will label its own pod with `role=leader`/`role=follower`.
-To enable, set these environment variables in your deployment:
+#### Core Required Variables
+- **`LEASE_NAME`**: Name of the Lease object to use for leader election  
+- **`NAMESPACE`**: Namespace where the Lease object exists (use Downward API)
 
-```yaml
-env:
-- name: LABEL_POD_ROLE
-  value: "true"  # Enables the labeling feature
-- name: POD_NAME  # Required when using labeling
-  valueFrom:
-    fieldRef:
-      fieldPath: metadata.name
-```
+#### Optional Variables
+- **`STATUS_DIR`**: Overrides default leader status directory (`/tmp/leader_status`)
+- **`HEALTH_PORT`**: Overrides default healthcheck port (`8080`)
+
+#### Pod Labeling Variables (requires RBAC)
+- **`LABEL_POD_ROLE`**: Set to "true" to enable role labeling (`role=leader`/`role=follower`)
+- **`POD_NAME`**: Required when using labels (use Downward API)
 
 **Required RBAC** (only needed when using labels):
 ```yaml
