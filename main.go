@@ -19,16 +19,16 @@ import (
 )
 
 var (
-	statusDir     string
-	leaderFile    string
-	followerFile  string
-	currentRole   string
-	roleCancel    context.CancelFunc
+	statusDir    string
+	leaderFile   string
+	followerFile string
+	currentRole  string
+	roleCancel   context.CancelFunc
 )
 
 const (
 	defaultStatusDir = "/tmp/leader_status"
-	tickInterval     = 2 * time.Second  // Match leader election retry period
+	tickInterval     = 2 * time.Second // Match leader election retry period
 )
 
 func initStatus() {
@@ -145,7 +145,7 @@ func setRole(role, identity string) {
 	if roleCancel != nil {
 		roleCancel()
 	}
-	
+
 	os.Remove(leaderFile)
 	os.Remove(followerFile)
 
@@ -188,18 +188,21 @@ func setRole(role, identity string) {
 }
 
 func patchPodRole(client *kubernetes.Clientset, namespace, podName, role string) error {
+	fmt.Printf("Attempting to patch pod %s/%s with role %s\n", namespace, podName, role)
 	patch := []byte(fmt.Sprintf(`{"metadata":{"labels":{"role":"%s"}}}`, role))
 	_, err := client.CoreV1().Pods(namespace).Patch(
 		context.TODO(),
 		podName,
 		types.StrategicMergePatchType,
-		patch, 
+		patch,
 		metav1.PatchOptions{},
 	)
 	if err != nil {
 		fmt.Printf("failed to patch pod role: %v\n", err)
+		return err
 	}
-	return err
+	fmt.Printf("Successfully patched pod %s/%s with role %s\n", namespace, podName, role)
+	return nil
 }
 
 func startHealthServer() {
@@ -212,7 +215,7 @@ func startHealthServer() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
-	
+
 	addr := fmt.Sprintf(":%s", port)
 	fmt.Printf("Starting health server on %s\n", addr)
 	if err := http.ListenAndServe(addr, nil); err != nil {
